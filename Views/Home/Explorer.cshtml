@@ -1,0 +1,180 @@
+@{
+    ViewData["Title"] = "File Explorer";
+}
+
+<div class="row">
+    <div class="col-md-12">
+        <div class="card">
+            <div class="card-header">
+                <div class="row align-items-center">
+                    <div class="col-md-8">
+                        <h4 class="mb-0">📂 <span id="containerName"></span></h4>
+                    </div>
+                    <div class="col-md-4 text-end">
+                        <button class="btn btn-sm btn-secondary" onclick="goBack()">← Back</button>
+                    </div>
+                </div>
+            </div>
+            <div class="card-body">
+                <nav aria-label="breadcrumb">
+                    <ol class="breadcrumb" id="breadcrumb"></ol>
+                </nav>
+
+                <div id="loading" class="text-center" style="display: none;">
+                    <div class="spinner-border" role="status">
+                        <span class="visually-hidden">Loading...</span>
+                    </div>
+                </div>
+
+                <div class="table-responsive">
+                    <table class="table table-hover" id="filesTable" style="display: none;">
+                        <thead class="table-light">
+                            <tr>
+                                <th>Name</th>
+                                <th>Size</th>
+                                <th>Modified</th>
+                                <th>Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody id="filesTableBody"></tbody>
+                    </table>
+                </div>
+
+                <div id="emptyState" class="text-center text-muted py-5" style="display: none;">
+                    <p>This folder is empty</p>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+@section Scripts {
+    <script>
+        const urlParams = new URLSearchParams(window.location.search);
+        const container = urlParams.get('container');
+        const prefix = urlParams.get('prefix') || '';
+
+        document.addEventListener('DOMContentLoaded', function() {
+            if (!container) {
+                window.location.href = '/';
+                return;
+            }
+            document.getElementById('containerName').textContent = container;
+            loadFiles();
+            updateBreadcrumb();
+        });
+
+        async function loadFiles() {
+            document.getElementById('loading').style.display = 'block';
+            document.getElementById('filesTable').style.display = 'none';
+            document.getElementById('emptyState').style.display = 'none';
+
+            try {
+                let url = `/api/blob/containers/${encodeURIComponent(container)}/blobs`;
+                if (prefix) {
+                    url += `?prefix=${encodeURIComponent(prefix)}`;
+                }
+
+                const response = await fetch(url);
+                if (!response.ok) throw new Error('Failed to load files');
+
+                const files = await response.json();
+                document.getElementById('loading').style.display = 'none';
+
+                if (files.length === 0) {
+                    document.getElementById('emptyState').style.display = 'block';
+                    return;
+                }
+
+                const tbody = document.getElementById('filesTableBody');
+                tbody.innerHTML = '';
+
+                files.forEach(file => {
+                    const row = document.createElement('tr');
+                    if (file.isDirectory) {
+                        row.innerHTML = `
+                            <td><a href="#" onclick="openFolder('${file.fullPath}'); return false;">📁 ${file.name}</a></td>
+                            <td>-</td>
+                            <td>-</td>
+                            <td><button class="btn btn-sm btn-outline-primary" onclick="openFolder('${file.fullPath}'); return false;">Open</button></td>
+                        `;
+                    } else {
+                        const size = formatBytes(file.size);
+                        const modified = file.lastModified ? new Date(file.lastModified).toLocaleString() : '-';
+                        row.innerHTML = `
+                            <td>📄 ${file.name}</td>
+                            <td>${size}</td>
+                            <td>${modified}</td>
+                            <td>
+                                <button class="btn btn-sm btn-success" onclick="downloadFile('${file.fullPath}')">⬇ Download</button>
+                            </td>
+                        `;
+                    }
+                    tbody.appendChild(row);
+                });
+
+                document.getElementById('filesTable').style.display = 'table';
+            } catch (error) {
+                document.getElementById('loading').style.display = 'none';
+                alert(`Error loading files: ${error.message}`);
+            }
+        }
+
+        function updateBreadcrumb() {
+            const breadcrumb = document.getElementById('breadcrumb');
+            breadcrumb.innerHTML = `<li class="breadcrumb-item"><a href="/">Home</a></li>`;
+            breadcrumb.innerHTML += `<li class="breadcrumb-item active">${container}</li>`;
+
+            if (prefix) {
+                const parts = prefix.split('/').filter(p => p);
+                let currentPath = '';
+                parts.forEach((part, index) => {
+                    currentPath += part + '/';
+                    const isLast = index === parts.length - 1;
+                    if (isLast) {
+                        breadcrumb.innerHTML += `<li class="breadcrumb-item active">${part}</li>`;
+                    } else {
+                        breadcrumb.innerHTML += `<li class="breadcrumb-item"><a href="#" onclick="navigateTo('${currentPath}'); return false;">${part}</a></li>`;
+                    }
+                });
+            }
+        }
+
+        function openFolder(path) {
+            window.location.href = `/explorer?container=${encodeURIComponent(container)}&prefix=${encodeURIComponent(path)}`;
+        }
+
+        function navigateTo(newPrefix) {
+            window.location.href = `/explorer?container=${encodeURIComponent(container)}&prefix=${encodeURIComponent(newPrefix)}`;
+        }
+
+        async function downloadFile(blob) {
+            try {
+                const response = await fetch(`/api/blob/download?container=${encodeURIComponent(container)}&blob=${encodeURIComponent(blob)}`);
+                if (!response.ok) throw new Error('Download failed');
+
+                const fileBlob = await response.blob();
+                const url = window.URL.createObjectURL(fileBlob);
+                const link = document.createElement('a');
+                link.href = url;
+                link.download = blob.split('/').pop();
+                link.click();
+                window.URL.revokeObjectURL(url);
+            } catch (error) {
+                alert(`Error downloading file: ${error.message}`);
+            }
+        }
+
+        function formatBytes(bytes) {
+            if (bytes === 0) return '0 B';
+            const k = 1024;
+            const sizes = ['B', 'KB', 'MB', 'GB'];
+            const i = Math.floor(Math.log(bytes) / Math.log(k));
+            return Math.round(bytes / Math.pow(k, i) * 100) / 100 + ' ' + sizes[i];
+        }
+
+        function goBack() {
+            window.history.back();
+        }
+    </script>
+}

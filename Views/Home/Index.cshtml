@@ -1,0 +1,81 @@
+@{
+    ViewData["Title"] = "Home";
+}
+
+<div class="row">
+    <div class="col-md-12">
+        @if (User.Identity?.IsAuthenticated ?? false)
+        {
+            <div class="card">
+                <div class="card-header">
+                    <h3 class="mb-0">📂 Browse Azure Blob Storage</h3>
+                </div>
+                <div class="card-body">
+                    <div id="loading" class="text-center" style="display: none;">
+                        <div class="spinner-border" role="status">
+                            <span class="visually-hidden">Loading...</span>
+                        </div>
+                    </div>
+                    <div id="containers" class="list-group"></div>
+                </div>
+            </div>
+        }
+        else
+        {
+            <div class="card border-info">
+                <div class="card-body text-center py-5">
+                    <h2 class="mb-4">Welcome to Azure Blob Explorer</h2>
+                    <p class="lead text-muted mb-4">Secure cloud storage browser with Azure AD B2C authentication</p>
+                    <a href="/auth/signin" class="btn btn-primary btn-lg">Sign In to Continue</a>
+                </div>
+            </div>
+        }
+    </div>
+</div>
+
+@section Scripts {
+    <script>
+        @if (User.Identity?.IsAuthenticated ?? false)
+        {
+            <text>
+            document.addEventListener('DOMContentLoaded', function() {
+                loadContainers();
+            });
+
+            async function loadContainers() {
+                document.getElementById('loading').style.display = 'block';
+                try {
+                    const response = await fetch('/api/blob/containers');
+                    if (!response.ok) throw new Error('Failed to load containers');
+                    
+                    const containers = await response.json();
+                    document.getElementById('loading').style.display = 'none';
+                    
+                    const containersList = document.getElementById('containers');
+                    containersList.innerHTML = '';
+                    
+                    if (containers.length === 0) {
+                        containersList.innerHTML = '<div class="alert alert-info">No containers available</div>';
+                        return;
+                    }
+                    
+                    containers.forEach(container => {
+                        const item = document.createElement('a');
+                        item.href = '#';
+                        item.className = 'list-group-item list-group-item-action';
+                        item.innerHTML = `📦 ${container}`;
+                        item.onclick = (e) => {
+                            e.preventDefault();
+                            window.location.href = `/explorer?container=${encodeURIComponent(container)}`;
+                        };
+                        containersList.appendChild(item);
+                    });
+                } catch (error) {
+                    document.getElementById('loading').style.display = 'none';
+                    document.getElementById('containers').innerHTML = `<div class="alert alert-danger">Error loading containers: ${error.message}</div>`;
+                }
+            }
+            </text>
+        }
+    </script>
+}

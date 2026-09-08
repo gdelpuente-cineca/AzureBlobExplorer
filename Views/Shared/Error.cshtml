@@ -1,0 +1,24 @@
+@model ErrorViewModel
+@{
+    ViewData["Title"] = "Error";
+}
+
+<div class="row justify-content-center">
+    <div class="col-md-6">
+        <div class="card border-danger">
+            <div class="card-header bg-danger">
+                <h3 class="text-white mb-0">⚠️ Error</h3>
+            </div>
+            <div class="card-body">
+                <p class="lead text-danger mb-3">@Model.ErrorMessage</p>
+                @if (Model.ShowRequestId)
+                {
+                    <p class="text-muted small">
+                        <strong>Request ID:</strong> <code>@Model.RequestId</code>
+                    </p>
+                }
+                <a href="/" class="btn btn-primary">Go Back Home</a>
+            </div>
+        </div>
+    </div>
+</div>

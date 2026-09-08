@@ -1,0 +1,11 @@
+{
+  "connectionStrings": {
+    "DefaultConnection": "Data Source=./app.db"
+  },
+  "Logging": {
+    "LogLevel": {
+      "Default": "Information",
+      "Microsoft.AspNetCore": "Warning"
+    }
+  }
+}
