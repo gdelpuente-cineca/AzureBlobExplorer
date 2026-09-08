@@ -1,0 +1,28 @@
+version: '3.8'
+
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: azure-blob-explorer
+    ports:
+      - "5000:80"
+    environment:
+      - ASPNETCORE_ENVIRONMENT=Production
+      - ASPNETCORE_URLS=http://+:80
+      - AzureAdB2C__Instance=https://{your-tenant}.b2clogin.com/
+      - AzureAdB2C__ClientId={your-client-id}
+      - AzureAdB2C__ClientSecret={your-client-secret}
+      - AzureAdB2C__Domain={your-tenant}.onmicrosoft.com
+      - AzureAdB2C__TenantId={your-tenant-id}
+      - AzureAdB2C__SignUpSignInPolicyId=b2c_1_susi
+      - AzureStorage__ConnectionString=DefaultEndpointsProtocol=https;AccountName={your-account-name};AccountKey={your-account-key};EndpointSuffix=core.windows.net
+      - ConnectionStrings__DefaultConnection=Data Source=/app/data/app.db
+      - Database__Provider=Sqlite
+    volumes:
+      - blob-explorer-data:/app/data
+    restart: unless-stopped
+
+volumes:
+  blob-explorer-data:
