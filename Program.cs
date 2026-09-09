@@ -9,11 +9,16 @@ using Microsoft.EntityFrameworkCore;
 
 var builder = WebApplication.CreateBuilder(args);
 
+// Load configuration
+var configuration = builder.Configuration;
+var enableAuditLogging = configuration.GetValue<bool>("Features:EnableAuditLogging");
+var enableAccessPolicies = configuration.GetValue<bool>("Features:EnableAccessPolicies");
+
 // Add services to the container
 
 // Authentication with Azure AD B2C
 builder.Services.AddAuthentication(OpenIdConnectDefaults.AuthenticationScheme)
-    .AddMicrosoftIdentityWebApp(builder.Configuration.GetSection("AzureAdB2C"))
+    .AddMicrosoftIdentityWebApp(configuration.GetSection("AzureAdB2C"))
     .EnableTokenAcquisitionToCallDownstreamApi()
     .AddInMemoryTokenCaches();
 
@@ -40,25 +45,35 @@ builder.Services.AddControllersWithViews(options =>
     options.Filters.Add(new AuthorizeFilter(policy));
 }).AddMicrosoftIdentityUI();
 
-// Add Entity Framework
-var connectionString = builder.Configuration.GetConnectionString("DefaultConnection") 
-    ?? "Data Source=app.db";
-
-if (builder.Configuration.GetValue<string>("Database:Provider") == "SqlServer")
+// Add Entity Framework only if audit/access policies are enabled
+if (enableAuditLogging || enableAccessPolicies)
 {
-    builder.Services.AddDbContext<ApplicationDbContext>(options =>
-        options.UseSqlServer(connectionString));
+    var connectionString = builder.Configuration.GetConnectionString("DefaultConnection") 
+        ?? "Data Source=app.db";
+
+    if (builder.Configuration.GetValue<string>("Database:Provider") == "SqlServer")
+    {
+        builder.Services.AddDbContext<ApplicationDbContext>(options =>
+            options.UseSqlServer(connectionString));
+    }
+    else
+    {
+        builder.Services.AddDbContext<ApplicationDbContext>(options =>
+            options.UseSqlite(connectionString));
+    }
+
+    builder.Services.AddScoped<IAuditService, AuditService>();
+    builder.Services.AddScoped<IAccessPolicyService, AccessPolicyService>();
 }
 else
 {
-    builder.Services.AddDbContext<ApplicationDbContext>(options =>
-        options.UseSqlite(connectionString));
+    // Add null implementations when features are disabled
+    builder.Services.AddScoped<IAuditService, NoOpAuditService>();
+    builder.Services.AddScoped<IAccessPolicyService, NoOpAccessPolicyService>();
 }
 
-// Add Services
+// Add Services (always available)
 builder.Services.AddScoped<IAzureBlobService, AzureBlobService>();
-builder.Services.AddScoped<IAuditService, AuditService>();
-builder.Services.AddScoped<IAccessPolicyService, AccessPolicyService>();
 
 // Add Cors
 builder.Services.AddCors(options =>
@@ -69,13 +84,19 @@ builder.Services.AddCors(options =>
             .AllowAnyHeader());
 });
 
+// Add HttpContextAccessor for audit service
+builder.Services.AddHttpContextAccessor();
+
 var app = builder.Build();
 
-// Apply database migrations
-using (var scope = app.Services.CreateScope())
+// Apply database migrations only if enabled
+if (enableAuditLogging || enableAccessPolicies)
 {
-    var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
-    db.Database.Migrate();
+    using (var scope = app.Services.CreateScope())
+    {
+        var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+        db.Database.Migrate();
+    }
 }
 
 // Configure the HTTP request pipeline

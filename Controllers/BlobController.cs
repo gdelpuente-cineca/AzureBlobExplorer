@@ -1,4 +1,3 @@
-using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Identity.Web;
 using AzureBlobExplorer.Models;
@@ -6,7 +5,7 @@ using AzureBlobExplorer.Services;
 
 namespace AzureBlobExplorer.Controllers
 {
-    [Authorize]
+    [Microsoft.AspNetCore.Authorization.Authorize]
     [Route("api/[controller]")]
     [ApiController]
     public class BlobController : ControllerBase
@@ -15,17 +14,22 @@ namespace AzureBlobExplorer.Controllers
         private readonly IAuditService _auditService;
         private readonly IAccessPolicyService _accessPolicyService;
         private readonly ILogger<BlobController> _logger;
+        private readonly bool _enableAuditLogging;
+        private readonly bool _enableAccessPolicies;
 
         public BlobController(
             IAzureBlobService blobService,
             IAuditService auditService,
             IAccessPolicyService accessPolicyService,
-            ILogger<BlobController> logger)
+            ILogger<BlobController> logger,
+            IConfiguration configuration)
         {
             _blobService = blobService;
             _auditService = auditService;
             _accessPolicyService = accessPolicyService;
             _logger = logger;
+            _enableAuditLogging = configuration.GetValue<bool>("Features:EnableAuditLogging");
+            _enableAccessPolicies = configuration.GetValue<bool>("Features:EnableAccessPolicies");
         }
 
         [HttpGet("containers")]
@@ -34,7 +38,7 @@ namespace AzureBlobExplorer.Controllers
             try
             {
                 var userId = User.GetObjectId();
-                var containers = await _blobService.ListContainersAsync(userId);
+                var containers = await _blobService.ListContainersAsync(userId, _enableAccessPolicies ? _accessPolicyService : null);
                 return Ok(containers);
             }
             catch (UnauthorizedAccessException ex)
@@ -55,7 +59,7 @@ namespace AzureBlobExplorer.Controllers
             try
             {
                 var userId = User.GetObjectId();
-                var blobs = await _blobService.ListBlobsAsync(container, prefix, userId);
+                var blobs = await _blobService.ListBlobsAsync(container, prefix, userId, _enableAccessPolicies ? _accessPolicyService : null);
                 return Ok(blobs);
             }
             catch (UnauthorizedAccessException ex)
@@ -78,13 +82,16 @@ namespace AzureBlobExplorer.Controllers
             {
                 var userId = User.GetObjectId();
                 
-                // Verify access
-                var hasAccess = await _accessPolicyService.HasAccessAsync(userId, container, blob, BlobPermission.Read);
-                if (!hasAccess)
+                // Verify access if policies enabled
+                if (_enableAccessPolicies)
                 {
-                    await _auditService.LogActionAsync(userId, "Download", container, blob, 
-                        isSuccessful: false, errorMessage: "Access Denied");
-                    return Forbid();
+                    var hasAccess = await _accessPolicyService.HasAccessAsync(userId, container, blob, BlobPermission.Read);
+                    if (!hasAccess)
+                    {
+                        await _auditService.LogActionAsync(userId, "Download", container, blob, 
+                            isSuccessful: false, errorMessage: "Access Denied");
+                        return Forbid();
+                    }
                 }
 
                 // Get blob properties for size
@@ -93,7 +100,7 @@ namespace AzureBlobExplorer.Controllers
                 // Download blob
                 var stream = await _blobService.DownloadBlobAsync(container, blob);
 
-                // Log the download
+                // Log the download if audit logging enabled
                 await _auditService.LogActionAsync(userId, "Download", container, blob, 
                     fileSize: properties?.Size, isSuccessful: true);
 
@@ -116,7 +123,7 @@ namespace AzureBlobExplorer.Controllers
         }
 
         [HttpPost("upload")]
-        [Authorize(Policy = "AdminOnly")]
+        [Microsoft.AspNetCore.Authorization.Authorize(Policy = "AdminOnly")]
         public async Task<IActionResult> UploadBlob([FromQuery] string container, [FromForm] IFormFile file, [FromQuery] string? prefix = "")
         {
             try
@@ -128,18 +135,21 @@ namespace AzureBlobExplorer.Controllers
 
                 var userId = User.GetObjectId();
 
-                // Verify access
-                var hasAccess = await _accessPolicyService.HasAccessAsync(userId, container, prefix, BlobPermission.Write);
-                if (!hasAccess)
+                // Verify access if policies enabled
+                if (_enableAccessPolicies)
                 {
-                    await _auditService.LogActionAsync(userId, "Upload", container, file.FileName, 
-                        isSuccessful: false, errorMessage: "Access Denied");
-                    return Forbid();
+                    var hasAccess = await _accessPolicyService.HasAccessAsync(userId, container, prefix, BlobPermission.Write);
+                    if (!hasAccess)
+                    {
+                        await _auditService.LogActionAsync(userId, "Upload", container, file.FileName, 
+                            isSuccessful: false, errorMessage: "Access Denied");
+                        return Forbid();
+                    }
                 }
 
                 await _blobService.UploadBlobAsync(container, file, prefix);
 
-                // Log the upload
+                // Log the upload if audit logging enabled
                 await _auditService.LogActionAsync(userId, "Upload", container, file.FileName, 
                     fileSize: file.Length, isSuccessful: true);
 
@@ -162,25 +172,28 @@ namespace AzureBlobExplorer.Controllers
         }
 
         [HttpDelete("delete")]
-        [Authorize(Policy = "AdminOnly")]
+        [Microsoft.AspNetCore.Authorization.Authorize(Policy = "AdminOnly")]
         public async Task<IActionResult> DeleteBlob([FromQuery] string container, [FromQuery] string blob)
         {
             try
             {
                 var userId = User.GetObjectId();
 
-                // Verify access
-                var hasAccess = await _accessPolicyService.HasAccessAsync(userId, container, blob, BlobPermission.Delete);
-                if (!hasAccess)
+                // Verify access if policies enabled
+                if (_enableAccessPolicies)
                 {
-                    await _auditService.LogActionAsync(userId, "Delete", container, blob, 
-                        isSuccessful: false, errorMessage: "Access Denied");
-                    return Forbid();
+                    var hasAccess = await _accessPolicyService.HasAccessAsync(userId, container, blob, BlobPermission.Delete);
+                    if (!hasAccess)
+                    {
+                        await _auditService.LogActionAsync(userId, "Delete", container, blob, 
+                            isSuccessful: false, errorMessage: "Access Denied");
+                        return Forbid();
+                    }
                 }
 
                 await _blobService.DeleteBlobAsync(container, blob);
 
-                // Log the deletion
+                // Log the deletion if audit logging enabled
                 await _auditService.LogActionAsync(userId, "Delete", container, blob, isSuccessful: true);
 
                 _logger.LogInformation($"User {userId} deleted blob {blob} from container {container}");

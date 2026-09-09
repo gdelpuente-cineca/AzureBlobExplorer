@@ -10,39 +10,39 @@ namespace AzureBlobExplorer.Services
     {
         private readonly BlobServiceClient _blobServiceClient;
         private readonly ILogger<AzureBlobService> _logger;
-        private readonly IAccessPolicyService _accessPolicyService;
 
         public AzureBlobService(
             IConfiguration configuration,
-            ILogger<AzureBlobService> logger,
-            IAccessPolicyService accessPolicyService)
+            ILogger<AzureBlobService> logger)
         {
             var connectionString = configuration["AzureStorage:ConnectionString"]
                 ?? throw new InvalidOperationException("Azure Storage connection string not configured.");
 
             _blobServiceClient = new BlobServiceClient(connectionString);
             _logger = logger;
-            _accessPolicyService = accessPolicyService;
         }
 
-        public async Task<List<string>> ListContainersAsync(string userId)
+        public async Task<List<string>> ListContainersAsync(string userId, IAccessPolicyService? accessPolicyService = null)
         {
             try
             {
-                var accessibleContainers = await _accessPolicyService.GetAccessibleContainersAsync(userId);
-                
-                if (!accessibleContainers.Any())
-                {
-                    _logger.LogWarning($"User {userId} has no container access");
-                    return new List<string>();
-                }
-
                 var containers = new List<string>();
                 await foreach (var containerItem in _blobServiceClient.GetBlobContainersAsync())
                 {
-                    if (accessibleContainers.Contains(containerItem.Name))
+                    containers.Add(containerItem.Name);
+                }
+
+                // If access policy service is provided, filter by accessible containers
+                if (accessPolicyService != null)
+                {
+                    var accessibleContainers = await accessPolicyService.GetAccessibleContainersAsync(userId);
+                    if (accessibleContainers.Any())
                     {
-                        containers.Add(containerItem.Name);
+                        containers = containers.Where(c => accessibleContainers.Contains(c)).ToList();
+                    }
+                    else if (!containers.Any())
+                    {
+                        _logger.LogWarning($"User {userId} has no container access");
                     }
                 }
 
@@ -55,16 +55,19 @@ namespace AzureBlobExplorer.Services
             }
         }
 
-        public async Task<List<BlobItem>> ListBlobsAsync(string container, string? prefix, string userId)
+        public async Task<List<BlobItem>> ListBlobsAsync(string container, string? prefix, string userId, IAccessPolicyService? accessPolicyService = null)
         {
             try
             {
-                // Verify access
-                var hasAccess = await _accessPolicyService.HasAccessAsync(userId, container, prefix, BlobPermission.Read);
-                if (!hasAccess)
+                // Verify access if policy service is provided
+                if (accessPolicyService != null)
                 {
-                    _logger.LogWarning($"User {userId} denied access to container {container}");
-                    throw new UnauthorizedAccessException($"Access denied to container {container}");
+                    var hasAccess = await accessPolicyService.HasAccessAsync(userId, container, prefix, BlobPermission.Read);
+                    if (!hasAccess)
+                    {
+                        _logger.LogWarning($"User {userId} denied access to container {container}");
+                        throw new UnauthorizedAccessException($"Access denied to container {container}");
+                    }
                 }
 
                 var containerClient = _blobServiceClient.GetBlobContainerClient(container);
